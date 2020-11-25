@@ -1,9 +1,12 @@
 CXXFLAGS+=-g -Wall -Werror -O2
 
-CPPFLAGS+=-I../openssl/include
-LDFLAGS+=-L../openssl
+#CPPFLAGS+=-I$(OPENSSL_DIR)/include
+#LDFLAGS+=-L$(OPENSSL_DIR)/lib
+#LDFLAGS+=-L/lib/x86_64-linux-gnu
+#LDFLAGS+="-Wl,-rpath=$(OPENSSL_DIR)/lib"
 LDLIBS+=-lssl -lcrypto -ldl -lpthread
-ENV=env LD_LIBRARY_PATH=../openssl
+#ENV=env LD_LIBRARY_PATH=$(OPENSSL_DIR)
+ENV_QAT=env USE_ENGINE=qatengine
 MEMUSAGE=/usr/bin/time -f %M
 
 bench: bench.cc
@@ -35,7 +38,28 @@ measure: bench
 	$(ENV) ./bench handshake-resume TLS_AES_256_GCM_SHA384
 	$(ENV) ./bench handshake-ticket TLS_AES_256_GCM_SHA384
 
+measure-qat: bench
+	$(ENV_QAT) ./bench bulk ECDHE-RSA-AES128-GCM-SHA256 1048576
+	$(ENV_QAT) ./bench bulk ECDHE-RSA-AES256-GCM-SHA384 1048576
+	$(ENV_QAT) ./bench bulk ECDHE-RSA-CHACHA20-POLY1305 1048576
+	$(ENV_QAT) ./bench bulk TLS_AES_256_GCM_SHA384 1048576
+	$(ENV_QAT) ./bench handshake ECDHE-RSA-AES256-GCM-SHA384
+	$(ENV_QAT) ./bench handshake-resume ECDHE-RSA-AES256-GCM-SHA384
+	$(ENV_QAT) ./bench handshake-ticket ECDHE-RSA-AES256-GCM-SHA384
+	$(ENV_QAT) ./bench handshake TLS_AES_256_GCM_SHA384
+	$(ENV_QAT) ./bench handshake-resume TLS_AES_256_GCM_SHA384
+	$(ENV_QAT) ./bench handshake-ticket TLS_AES_256_GCM_SHA384
+
+
 memory: bench
+	$(ENV) $(MEMUSAGE) ./bench memory ECDHE-RSA-AES256-GCM-SHA384 100
+	$(ENV) $(MEMUSAGE) ./bench memory ECDHE-RSA-AES256-GCM-SHA384 1000
+	$(ENV) $(MEMUSAGE) ./bench memory ECDHE-RSA-AES256-GCM-SHA384 5000
+	$(ENV) $(MEMUSAGE) ./bench memory TLS_AES_256_GCM_SHA384 100
+	$(ENV) $(MEMUSAGE) ./bench memory TLS_AES_256_GCM_SHA384 1000
+	$(ENV) $(MEMUSAGE) ./bench memory TLS_AES_256_GCM_SHA384 5000
+
+memory-qat: bench
 	$(ENV) $(MEMUSAGE) ./bench memory ECDHE-RSA-AES256-GCM-SHA384 100
 	$(ENV) $(MEMUSAGE) ./bench memory ECDHE-RSA-AES256-GCM-SHA384 1000
 	$(ENV) $(MEMUSAGE) ./bench memory ECDHE-RSA-AES256-GCM-SHA384 5000

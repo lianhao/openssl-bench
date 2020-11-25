@@ -1,6 +1,7 @@
 #include <openssl/ssl.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
+#include <openssl/engine.h>
 
 #include <sys/time.h>
 
@@ -9,6 +10,8 @@
 #include <string.h>
 
 #include <vector>
+
+BIO *bio_err = NULL;
 
 static bool chkerr(int err)
 {
@@ -48,16 +51,16 @@ public:
   void load_server_creds()
   {
     int err;
-    err = SSL_CTX_use_certificate_chain_file(m_ctx, "../rustls/test-ca/rsa/end.fullchain");
+    err = SSL_CTX_use_certificate_chain_file(m_ctx, "./test-ca/rsa/end.fullchain");
     assert(err == 1);
-    err = SSL_CTX_use_PrivateKey_file(m_ctx, "../rustls/test-ca/rsa/end.key", SSL_FILETYPE_PEM);
+    err = SSL_CTX_use_PrivateKey_file(m_ctx, "./test-ca/rsa/end.key", SSL_FILETYPE_PEM);
     assert(err == 1);
   }
 
   void load_client_creds()
   {
     int err;
-    err = SSL_CTX_load_verify_locations(m_ctx, "../rustls/test-ca/rsa/ca.cert", NULL);
+    err = SSL_CTX_load_verify_locations(m_ctx, "./test-ca/rsa/ca.cert", NULL);
     assert(err == 1);
   }
 
@@ -476,17 +479,75 @@ static int usage()
 {
   puts("usage: bench <handshake|handshake-resume|handshake-ticket> <suite>");
   puts("usage: bench bulk <suite> <plaintext-size>");
+  puts("usage: use environment variable BENCH_MULTIPLIER or USE_ENGINE if necessary!");
   return 1;
+}
+
+
+static ENGINE *try_load_engine(const char *engine)
+{
+    ENGINE *e = ENGINE_by_id("dynamic");
+    if (e) {
+        if (!ENGINE_ctrl_cmd_string(e, "SO_PATH", engine, 0)
+            || !ENGINE_ctrl_cmd_string(e, "LOAD", NULL, 0)) {
+            ENGINE_free(e);
+            e = NULL;
+        }
+    }
+    return e;
+}
+
+ENGINE *init_engine(const char *engine)
+{
+  ENGINE *e = NULL;
+
+  if (engine == NULL) {
+    return NULL;
+  }
+
+  if (!OPENSSL_init_ssl(OPENSSL_INIT_LOAD_CONFIG, NULL)) {
+    BIO_printf(bio_err, "OPENSSL_init_ssl failed\n");
+    ERR_print_errors(bio_err);
+    return NULL;
+  }
+
+  if ((e = ENGINE_by_id(engine)) == NULL
+       && (e = try_load_engine(engine)) == NULL) {
+    BIO_printf(bio_err, "invalid engine \"%s\"\n", engine);
+    ERR_print_errors(bio_err);
+    return NULL;
+  }
+  if (!ENGINE_set_default(e, ENGINE_METHOD_ALL)) {
+    BIO_printf(bio_err, "can't use that engine\n");
+    ERR_print_errors(bio_err);
+    ENGINE_free(e);
+    return NULL;
+  }
+
+  printf("engine \"%s\" set.\n", ENGINE_get_id(e));
+  return e;
+}
+
+void release_engine(ENGINE *e)
+{
+  if (e != NULL) {
+    ENGINE_free(e);
+  }
 }
 
 int main(int argc, char **argv)
 {
-  Context server_ctx = Context::server();
-  Context client_ctx = Context::client();
-
   if (argc < 3) {
     return usage();
   }
+
+  bio_err = BIO_new_fp(stderr, BIO_NOCLOSE | BIO_FP_TEXT);
+
+  ENGINE *e = NULL;
+  e = init_engine(getenv("USE_ENGINE"));
+
+  Context server_ctx = Context::server();
+  Context client_ctx = Context::client();
 
   server_ctx.set_ciphers(argv[2]);
   client_ctx.set_ciphers(argv[2]);
@@ -504,8 +565,9 @@ int main(int argc, char **argv)
   } else if (!strcmp(argv[1], "memory")) {
     test_memory(server_ctx, client_ctx, atoi(argv[3]));
   } else {
-    return usage();
+    usage();
   }
-
+  release_engine(e);
+  BIO_free(bio_err);
   return 0;
 }
